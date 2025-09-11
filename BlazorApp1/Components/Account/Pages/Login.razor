@@ -4,60 +4,71 @@
 @using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Identity
 @using BlazorApp1.Data
+@using Microsoft.AspNetCore.Identity.UI.Services
+@using Microsoft.AspNetCore.WebUtilities
+@using System.Text.Encodings.Web
+@using System.Text
 
 @inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
 @inject ILogger<Login> Logger
 @inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
+@inject IEmailSender EmailSender
 
 <PageTitle>Log in</PageTitle>
 
 <h1>Log in</h1>
+
 <div class="row">
     <div class="col-lg-6">
         <section>
-            <StatusMessage Message="@errorMessage" />
-            <EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login">
+            <StatusMessage Message="@StatusMessage" />
+
+            <EditForm Model="Input" OnValidSubmit="LoginUser" FormName="login">
                 <DataAnnotationsValidator />
-                <h2>Use a local account to log in.</h2>
-                <hr />
                 <ValidationSummary class="text-danger" role="alert" />
+                
+                <h2>Use a local account to log in</h2>
+                <hr />
+
+                <!-- Email -->
                 <div class="form-floating mb-3">
-                    <InputText @bind-Value="Input.Email" id="Input.Email" class="form-control" autocomplete="username" aria-required="true" placeholder="name@example.com" />
-                    <label for="Input.Email" class="form-label">Email</label>
+                    <InputText @bind-Value="Input.Email" id="Input.Email" class="form-control" autocomplete="username" placeholder="name@example.com" />
+                    <label for="Input.Email">Email</label>
                     <ValidationMessage For="() => Input.Email" class="text-danger" />
                 </div>
+
+                <!-- Password -->
                 <div class="form-floating mb-3">
-                    <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="form-control" autocomplete="current-password" aria-required="true" placeholder="password" />
-                    <label for="Input.Password" class="form-label">Password</label>
+                    <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="form-control" autocomplete="current-password" placeholder="Password" />
+                    <label for="Input.Password">Password</label>
                     <ValidationMessage For="() => Input.Password" class="text-danger" />
                 </div>
-                <div class="checkbox mb-3">
-                    <label class="form-label">
-                        <InputCheckbox @bind-Value="Input.RememberMe" class="darker-border-checkbox form-check-input" />
-                        Remember me
-                    </label>
+
+                <!-- Remember me -->
+                <div class="form-check mb-3">
+                    <InputCheckbox @bind-Value="Input.RememberMe" class="form-check-input" id="Input.RememberMe" />
+                    <label class="form-check-label" for="Input.RememberMe">Remember me?</label>
                 </div>
-                <div>
-                    <button type="submit" class="w-100 btn btn-lg btn-primary">Log in</button>
-                </div>
-                <div>
-                    <p>
-                        <a href="Account/ForgotPassword">Forgot your password?</a>
-                    </p>
-                    <p>
-                        <a href="@(NavigationManager.GetUriWithQueryParameters("Account/Register", new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl }))">Register as a new user</a>
-                    </p>
-                    <p>
-                        <a href="Account/ResendEmailConfirmation">Resend email confirmation</a>
-                    </p>
-                </div>
+
+                <button type="submit" class="w-100 btn btn-lg btn-primary mb-3">Log in</button>
+
+                <!-- Links -->
+                <p><a href="Account/ForgotPassword">Forgot your password?</a></p>
+                <p>
+                    <a href="@(NavigationManager.GetUriWithQueryParameters("Account/Register", new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl }))">Register as a new user</a>
+                </p>
+                <p>
+                    <a href="#" @onclick="ResendEmailConfirmationAsync">Resend email confirmation</a>
+                </p>
             </EditForm>
         </section>
     </div>
-    <div class="col-lg-4 col-lg-offset-2">
+
+    <div class="col-lg-4 offset-lg-2">
         <section>
-            <h3>Use another service to log in.</h3>
+            <h3>Use another service to log in</h3>
             <hr />
             <ExternalLoginPicker />
         </section>
@@ -65,7 +76,7 @@
 </div>
 
 @code {
-    private string? errorMessage;
+    private string? StatusMessage;
 
     [CascadingParameter]
     private HttpContext HttpContext { get; set; } = default!;
@@ -80,20 +91,24 @@
     {
         if (HttpMethods.IsGet(HttpContext.Request.Method))
         {
-            // Clear the existing external cookie to ensure a clean login process
             await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);
         }
     }
 
-    public async Task LoginUser()
+    private async Task LoginUser()
     {
-        // This doesn't count login failures towards account lockout
-        // To enable password failures to trigger account lockout, set lockoutOnFailure: true
+        if (string.IsNullOrWhiteSpace(Input.Email) || string.IsNullOrWhiteSpace(Input.Password))
+        {
+            StatusMessage = "Email and password are required.";
+            return;
+        }
+
         var result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, Input.RememberMe, lockoutOnFailure: false);
+
         if (result.Succeeded)
         {
             Logger.LogInformation("User logged in.");
-            RedirectManager.RedirectTo(ReturnUrl);
+            RedirectManager.RedirectTo(ReturnUrl ?? "/");
         }
         else if (result.RequiresTwoFactor)
         {
@@ -108,21 +123,54 @@
         }
         else
         {
-            errorMessage = "Error: Invalid login attempt.";
+            StatusMessage = "Invalid login attempt.";
         }
     }
 
-    private sealed class InputModel
+    private async Task ResendEmailConfirmationAsync()
     {
-        [Required]
-        [EmailAddress]
-        public string Email { get; set; } = "";
+        StatusMessage = null;
 
-        [Required]
-        [DataType(DataType.Password)]
-        public string Password { get; set; } = "";
+        if (string.IsNullOrWhiteSpace(Input.Email))
+        {
+            StatusMessage = "Please enter your email first.";
+            return;
+        }
 
-        [Display(Name = "Remember me?")]
-        public bool RememberMe { get; set; }
+        try
+        {
+            var user = await UserManager.FindByEmailAsync(Input.Email);
+            if (user is null)
+            {
+                StatusMessage = "User not found.";
+                return;
+            }
+
+            var token = await UserManager.GenerateEmailConfirmationTokenAsync(user);
+            var encodedToken = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(token));
+
+            var callbackUrl = NavigationManager.GetUriWithQueryParameters(
+                NavigationManager.ToAbsoluteUri("Account/ConfirmEmail").AbsoluteUri,
+                new Dictionary<string, object?> { ["userId"] = user.Id, ["code"] = encodedToken });
+
+            var subject = "Confirm your email";
+            var htmlMessage = $"Please confirm your account by <a href='{HtmlEncoder.Default.Encode(callbackUrl)}'>clicking here</a>.";
+
+            try
+            {
+                await EmailSender.SendEmailAsync(Input.Email, subject, htmlMessage);
+                StatusMessage = "Confirmation email sent. Please check your email.";
+            }
+            catch (Exception emailEx)
+            {
+                Logger.LogError(emailEx, "Failed to send confirmation email.");
+                StatusMessage = $"Failed to send email: {emailEx.Message}";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error in ResendEmailConfirmationAsync");
+            StatusMessage = $"An unexpected error occurred: {ex.Message}";
+        }
     }
 }
