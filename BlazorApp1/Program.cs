@@ -6,6 +6,9 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using WebPWrecover.Services;
+using DotNetEnv;
+using ServiceStack.Text;
+
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddScoped<IEmailSender, EmailSender>();
 // Add services to the container.
@@ -25,7 +28,12 @@ builder.Services.AddAuthentication(options =>
     })
     .AddIdentityCookies();
 builder.Services.AddAuthorization();
-
+Env.Load();
+// Now you can bind environment variables to your options
+builder.Services.Configure<AuthMessageSenderOptions>(options =>
+{
+    options.SendGridKey = Environment.GetEnvironmentVariable("SENDGRID_KEY");
+});
 //var connectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
 //builder.Services.AddDbContext<ApplicationDbContext>(options =>
 //    options.UseSqlServer(connectionString));
